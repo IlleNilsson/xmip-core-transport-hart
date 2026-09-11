@@ -14,7 +14,7 @@
 //! Location takes what the line carries, a burst-mode device's variable
 //! included, or reads the Stream a device holds.
 //!
-//! The line is a trait: [`Loopback`] is a field device on an in-process
+//! The line is a trait: [`LoopbackLine`] is a field device on an in-process
 //! line, which every test and every box without a HART modem drives, the
 //! way can-bus drives its loopback bus. A deployment's line is a HART modem
 //! on a serial port — the `xmip-core-transport-serial` technology, once it
@@ -26,13 +26,14 @@
 
 pub mod device;
 pub mod frame;
+pub mod loopback;
 
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 pub use device::{Device, Identity};
 pub use frame::{Address, Frame, Kind};
+pub use loopback::LoopbackLine;
 use transport::error::{Result, protocol_error};
 use transport::{Arrived, Directions, Transport};
 
@@ -52,73 +53,8 @@ pub trait Line: Send + Sync {
     fn receive(&self, timeout: Duration) -> Result<Option<Vec<u8>>>;
 }
 
-/// A field device on an in-process line: what the master transmits, the
-/// device answers, and the answer is what the master receives next.
-pub struct Loopback {
-    device: Arc<Device>,
-    to_master: Mutex<VecDeque<Vec<u8>>>,
-}
-
-impl Loopback {
-    #[must_use]
-    pub fn new(device: Device) -> Self {
-        Self {
-            device: Arc::new(device),
-            to_master: Mutex::new(VecDeque::new()),
-        }
-    }
-
-    #[must_use]
-    pub fn device(&self) -> &Device {
-        &self.device
-    }
-
-    /// The device bursts its primary variable, asked by nobody.
-    ///
-    /// # Errors
-    /// Never on this line; the signature is the trait's.
-    pub fn burst(&self) -> Result<()> {
-        let address = self.device.identity().address();
-        let data = self.device.answer(device::READ_PRIMARY_VARIABLE, &[]);
-        let frame = Frame::new(Kind::Back, address, 1, &data)?;
-        self.queue(frame.encode());
-        Ok(())
-    }
-
-    fn queue(&self, bytes: Vec<u8>) {
-        self.to_master
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push_back(bytes);
-    }
-}
-
-impl Line for Loopback {
-    fn name(&self) -> &'static str {
-        "loopback"
-    }
-
-    fn transmit(&self, bytes: &[u8]) -> Result<()> {
-        let frame = Frame::decode(bytes)?;
-        if frame.kind != Kind::Stx || !self.device.answers_to(&frame.address) {
-            return Ok(());
-        }
-        let data = self.device.answer(u16::from(frame.command), &frame.data);
-        let answer = Frame::new(Kind::Ack, frame.address, frame.command, &data)?;
-        self.queue(answer.encode());
-        Ok(())
-    }
-
-    fn receive(&self, _timeout: Duration) -> Result<Option<Vec<u8>>> {
-        Ok(self
-            .to_master
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .pop_front())
-    }
-}
-
 /// The master's side of a line.
+#[derive(Clone)]
 pub struct HartTransport {
     line: Arc<dyn Line>,
     address: Address,
@@ -261,6 +197,7 @@ impl Transport for HartTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use transport::loopback::Loopback;
 
     fn identity() -> Identity {
         Identity {
@@ -270,32 +207,49 @@ mod tests {
         }
     }
 
-    fn master(line: &Arc<Loopback>) -> HartTransport {
+    fn master(line: &Arc<LoopbackLine>) -> HartTransport {
         let line: Arc<dyn Line> = Arc::clone(line) as Arc<dyn Line>;
         HartTransport::new(line, Address::Short(0)).timing_out_after(Duration::from_millis(10))
     }
 
     #[test]
     fn a_stream_goes_out_to_the_device_and_comes_back_whole() {
-        let line = Arc::new(Loopback::new(Device::new(identity())));
-        let master = master(&line);
+        let master = HartTransport::loopback();
         let long: Vec<u8> = (0..3000u32)
             .map(|n| u8::try_from(n % 251).unwrap_or(0))
             .collect();
-        master.send("hart://loopback/0", &long).expect("sending");
-        assert_eq!(line.device().held(), long);
-        let back = master.read_stream().expect("reading");
+        let back = master.round(&long).expect("round");
         assert_eq!(back.bytes, long);
         assert_eq!(back.origin_uri, "hart://loopback/0?command=131");
         master
             .send("hart://loopback/26-e5-0a1b2c", b"")
             .expect("empty");
         assert!(master.read_stream().expect("reading").bytes.is_empty());
+        assert!(master.ceiling().is_none());
+        assert!(master.refuses(&long).is_none());
+    }
+
+    #[test]
+    fn the_loopback_returns_the_edges_whole() {
+        let master = HartTransport::loopback();
+        let edges: [(&str, Vec<u8>); 6] = [
+            ("empty", Vec::new()),
+            ("one byte", vec![0x2a]),
+            ("every byte", (0..=255).collect()),
+            ("nul run", vec![0; 512]),
+            ("high bytes", vec![0xff; 512]),
+            ("crlf storm", b"\r\n".repeat(400)),
+        ];
+        for (name, payload) in edges {
+            assert_eq!(master.round(&payload).expect(name).bytes, payload, "{name}");
+        }
     }
 
     #[test]
     fn the_device_identifies_itself_and_bursts_its_variable() {
-        let line = Arc::new(Loopback::new(Device::new(identity()).measuring(12, 4.5)));
+        let line = Arc::new(LoopbackLine::new(
+            Device::new(identity()).measuring(12, 4.5),
+        ));
         let master = master(&line);
         assert_eq!(master.identify().expect("identify"), identity());
         assert!(
@@ -314,7 +268,9 @@ mod tests {
 
     #[test]
     fn a_device_that_is_not_addressed_does_not_answer() {
-        let line = Arc::new(Loopback::new(Device::new(identity()).at_polling_address(3)));
+        let line = Arc::new(LoopbackLine::new(
+            Device::new(identity()).at_polling_address(3),
+        ));
         let master = master(&line);
         let error = master.identify().expect_err("silence");
         assert!(error.retryable, "a device may be slow to answer");
@@ -328,7 +284,7 @@ mod tests {
 
     #[test]
     fn a_line_has_no_artefact_to_claim() {
-        let line = Arc::new(Loopback::new(Device::new(identity())));
+        let line = Arc::new(LoopbackLine::new(Device::new(identity())));
         let master = master(&line);
         assert!(master.claims().is_none());
         assert_eq!(master.name(), "hart");
