@@ -198,6 +198,7 @@ impl Transport for HartTransport {
 mod tests {
     use super::*;
     use transport::loopback::Loopback;
+    use transport::payload::edge_payloads;
 
     fn identity() -> Identity {
         Identity {
@@ -232,14 +233,7 @@ mod tests {
     #[test]
     fn the_loopback_returns_the_edges_whole() {
         let master = HartTransport::loopback();
-        let edges: [(&str, Vec<u8>); 6] = [
-            ("empty", Vec::new()),
-            ("one byte", vec![0x2a]),
-            ("every byte", (0..=255).collect()),
-            ("nul run", vec![0; 512]),
-            ("high bytes", vec![0xff; 512]),
-            ("crlf storm", b"\r\n".repeat(400)),
-        ];
+        let edges = edge_payloads();
         for (name, payload) in edges {
             assert_eq!(master.round(&payload).expect(name).bytes, payload, "{name}");
         }
