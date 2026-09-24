@@ -200,7 +200,7 @@ impl Frame {
     }
 
     /// How long the frame opening `read` is, once its bytes say: the rule a
-    /// serial line reads HART by ([`serial::Framing::Measured`]). The
+    /// serial line reads HART by (the serial technology's `Framing::Measured`). The
     /// preambles run until the delimiter, which says how long the address
     /// is; the byte count after the command says the rest.
     ///
