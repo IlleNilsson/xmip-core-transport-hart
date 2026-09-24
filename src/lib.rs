@@ -183,7 +183,7 @@ impl Transport for HartTransport {
 mod tests {
     use super::*;
     use crate::loopback::OnTheBus;
-    use serial::bus::Bus;
+    use sdk::serial::Bus;
     use transport::loopback::Loopback;
     use transport::payload::edge_payloads;
 
@@ -199,7 +199,7 @@ mod tests {
     fn on_a_bus(device: Device) -> (Arc<Bus>, Arc<OnTheBus>) {
         let bus = Arc::new(Bus::new("loopback"));
         let device = Arc::new(OnTheBus(Arc::new(device)));
-        bus.attach(Arc::clone(&device) as Arc<dyn serial::bus::Device>);
+        bus.attach(Arc::clone(&device) as Arc<dyn sdk::serial::Device>);
         (bus, device)
     }
 

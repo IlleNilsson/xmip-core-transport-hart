@@ -1,7 +1,7 @@
 //! A field device on the serial technology's multi-drop bus, and both ends
 //! of one HART exchange on it (ADR-0051).
 //!
-//! [`OnTheBus`] is a field device as a device on [`serial::bus::Bus`]: it
+//! [`OnTheBus`] is a field device as a device on the SDK's [`Bus`]: it
 //! hears every frame the master puts on the bus and answers the ones
 //! addressed to it, as a transmitter on a real loop does; a device at another
 //! polling address keeps silent. A device in burst mode speaks unasked, which
@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use serial::bus::{self, Bus};
+use sdk::serial::{self, Bus};
 use transport::error::Result;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::{Arrived, Transport};
@@ -39,7 +39,7 @@ impl OnTheBus {
     }
 }
 
-impl bus::Device for OnTheBus {
+impl serial::Device for OnTheBus {
     fn hear(&self, bytes: &[u8]) -> Result<Option<Vec<u8>>> {
         let frame = Frame::decode(bytes)?;
         if frame.kind != Kind::Stx || !self.0.answers_to(&frame.address) {
