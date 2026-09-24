@@ -1,95 +1,61 @@
-//! A field device on an in-process line, and both ends of one HART
-//! exchange on it (ADR-0051).
+//! A field device on the serial technology's multi-drop bus, and both ends
+//! of one HART exchange on it (ADR-0051).
 //!
-//! [`LoopbackLine`] is the line every test and every box without a HART
-//! modem drives: what the master transmits, the device answers, and the
-//! answer is what the master receives next. The loopback pair is a master
-//! on that line and the device it writes a Stream to; the far end is the
-//! device holding it, read back a chunk at a time. One line, one thread:
-//! the round goes in order.
+//! [`OnTheBus`] is a field device as a device on [`serial::bus::Bus`]: it
+//! hears every frame the master puts on the bus and answers the ones
+//! addressed to it, as a transmitter on a real loop does; a device at another
+//! polling address keeps silent. A device in burst mode speaks unasked, which
+//! [`OnTheBus::burst`] puts on the bus. The loopback pair is a master and one
+//! device on a fresh bus; the far end is the device holding what the master
+//! wrote, read back a chunk at a time.
+//!
+//! Until 2026-09-24 the device sat on a line of its own that no other device
+//! could share (open problem 24).
 
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::Arc;
 
+use serial::bus::{self, Bus};
 use transport::error::Result;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::{Arrived, Transport};
 
+use crate::HartTransport;
 use crate::device::{self, Device, Identity};
 use crate::frame::{Address, Frame, Kind};
-use crate::{HartTransport, Line};
 
-/// A field device on an in-process line: what the master transmits, the
-/// device answers, and the answer is what the master receives next.
-pub struct LoopbackLine {
-    device: Arc<Device>,
-    to_master: Mutex<VecDeque<Vec<u8>>>,
-}
+/// A field device as a device on the bus.
+pub struct OnTheBus(pub Arc<Device>);
 
-impl LoopbackLine {
-    #[must_use]
-    pub fn new(device: Device) -> Self {
-        Self {
-            device: Arc::new(device),
-            to_master: Mutex::new(VecDeque::new()),
-        }
-    }
-
-    #[must_use]
-    pub fn device(&self) -> &Device {
-        &self.device
-    }
-
-    /// The device bursts its primary variable, asked by nobody.
+impl OnTheBus {
+    /// The frame a device in burst mode puts on the bus unasked: its primary
+    /// variable, to be spoken with [`Bus::speak`].
     ///
     /// # Errors
-    /// Never on this line; the signature is the trait's.
-    pub fn burst(&self) -> Result<()> {
-        let address = self.device.identity().address();
-        let data = self.device.answer(device::READ_PRIMARY_VARIABLE, &[]);
-        let frame = Frame::new(Kind::Back, address, 1, &data)?;
-        self.queue(frame.encode());
-        Ok(())
-    }
-
-    fn queue(&self, bytes: Vec<u8>) {
-        self.to_master
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push_back(bytes);
+    /// A variable no frame carries.
+    pub fn burst(&self) -> Result<Vec<u8>> {
+        let address = self.0.identity().address();
+        let data = self.0.answer(device::READ_PRIMARY_VARIABLE, &[]);
+        Ok(Frame::new(Kind::Back, address, 1, &data)?.encode())
     }
 }
 
-impl Line for LoopbackLine {
-    fn name(&self) -> &'static str {
-        "loopback"
-    }
-
-    fn transmit(&self, bytes: &[u8]) -> Result<()> {
+impl bus::Device for OnTheBus {
+    fn hear(&self, bytes: &[u8]) -> Result<Option<Vec<u8>>> {
         let frame = Frame::decode(bytes)?;
-        if frame.kind != Kind::Stx || !self.device.answers_to(&frame.address) {
-            return Ok(());
+        if frame.kind != Kind::Stx || !self.0.answers_to(&frame.address) {
+            return Ok(None);
         }
-        let data = self.device.answer(u16::from(frame.command), &frame.data);
-        let answer = Frame::new(Kind::Ack, frame.address, frame.command, &data)?;
-        self.queue(answer.encode());
-        Ok(())
-    }
-
-    fn receive(&self, _timeout: Duration) -> Result<Option<Vec<u8>>> {
-        Ok(self
-            .to_master
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .pop_front())
+        let data = self.0.answer(u16::from(frame.command), &frame.data);
+        Ok(Some(
+            Frame::new(Kind::Ack, frame.address, frame.command, &data)?.encode(),
+        ))
     }
 }
 
 impl HartTransport {
-    /// Both ends on one line: a master at polling address 0 and the device
-    /// that answers it, on a fresh [`LoopbackLine`], the loopback timeout
-    /// on the master.
+    /// Both ends on one bus: a master at polling address 0 and the device
+    /// that answers it, on a fresh [`Bus`], the loopback timeout on the
+    /// master.
     #[must_use]
     pub fn loopback() -> Self {
         let device = Device::new(Identity {
@@ -97,8 +63,9 @@ impl HartTransport {
             device_type: 0xe5,
             device_id: 0x0a_1b2c,
         });
-        Self::new(Arc::new(LoopbackLine::new(device)), Address::Short(0))
-            .timing_out_after(LOOPBACK_TIMEOUT)
+        let bus = Bus::new("loopback");
+        bus.attach(Arc::new(OnTheBus(Arc::new(device))));
+        Self::new(Arc::new(bus), Address::Short(0)).timing_out_after(LOOPBACK_TIMEOUT)
     }
 }
 
@@ -127,7 +94,7 @@ impl Loopback for HartTransport {
         }))
     }
 
-    /// A fresh master on the same line writes to the device at `address`.
+    /// A fresh master on the same bus writes to the device at `address`.
     fn send_to(&self, address: &str, payload: &[u8]) -> Result<()> {
         Self::new(Arc::clone(&self.line), self.address.clone())
             .timing_out_after(self.timeout)
@@ -135,7 +102,7 @@ impl Loopback for HartTransport {
     }
 
     fn unblock(&self, _address: &str) {
-        // The line is in-process; nothing listens on a socket.
+        // The bus is in-process; nothing listens on a socket.
     }
 
     /// In order on one thread: a serial line has one master, so the write
