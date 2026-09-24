@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/IlleNilsson/xmip-core-transport-hart"
-description = "HART transport: the field device protocol on the 4-20 mA loop — short and long frames with an XOR checksum, commands 0 and 1, a Stream written and read in chunks through device-specific commands, burst mode taken as it comes; a loopback line stands in for the modem. A xmip-core-transport technology."
+description = "HART transport: the field device protocol on the 4-20 mA loop — short and long frames with an XOR checksum, commands 0 and 1, a Stream written and read in chunks through device-specific commands, burst mode taken as it comes; field devices on the serial technology's multi-drop bus stand in for the modem. A xmip-core-transport technology."
 publish = false
 
 [lib]
@@ -15,11 +15,11 @@ path = "src/lib.rs"
 
 [dependencies]
 # A Technology depends on its parent Capability, never the reverse
-# (repository-model.md). Standard library otherwise: HART is a dozen bytes
-# and an XOR on a 1200-baud line. The serial technology is the line a
-# deployment uses; it keeps its port private today, so the line is a trait
-# here and the serial port joins it when serial exposes one.
+# (repository-model.md). HART is a dozen bytes and an XOR on a 1200-baud
+# line; the line is the capability's, and the serial technology carries it,
+# a modem on a port or its multi-drop bus in process (open problem 24).
 transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
+serial = { package = "xmip-core-transport-serial", git = "https://github.com/IlleNilsson/xmip-core-transport-serial", branch = "main" }
 
 [dev-dependencies]
 # The loopback payloads the tests drive, from the capability's test

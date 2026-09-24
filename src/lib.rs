@@ -14,12 +14,13 @@
 //! Location takes what the line carries, a burst-mode device's variable
 //! included, or reads the Stream a device holds.
 //!
-//! The line is a trait: [`LoopbackLine`] is a field device on an in-process
-//! line, which every test and every box without a HART modem drives, the
-//! way can-bus drives its loopback bus. A deployment's line is a HART modem
-//! on a serial port — the `xmip-core-transport-serial` technology, once it
-//! exposes its port — or a HART-IP gateway. `WirelessHART` carries the same
-//! commands over the air and rides on this crate's [`device`] for them.
+//! The carrier is a [`Line`]: a HART modem on a serial port, framed by
+//! [`Frame::measure`], or the serial technology's multi-drop bus in process,
+//! with field devices on it at their own polling addresses —
+//! [`loopback::OnTheBus`] — which every test and every box without a modem
+//! drives (open problem 24). A HART-IP gateway is a line too. `WirelessHART`
+//! carries the same commands over the air and rides on this crate's
+//! [`device`] for them.
 //!
 //! The origin URI carries what the frame knew:
 //! `hart://loopback/26-e5-0a1b2c?command=1&burst=true`.
@@ -33,25 +34,9 @@ use std::time::Duration;
 
 pub use device::{Device, Identity};
 pub use frame::{Address, Frame, Kind};
-pub use loopback::LoopbackLine;
 use transport::error::{Result, protocol_error};
+use transport::line::Line;
 use transport::{Arrived, Directions, Transport};
-
-/// Where frames go and come from.
-pub trait Line: Send + Sync {
-    /// The line's name, for the origin URI.
-    fn name(&self) -> &str;
-    /// Put a frame on the line.
-    ///
-    /// # Errors
-    /// Where the line refused it.
-    fn transmit(&self, frame: &[u8]) -> Result<()>;
-    /// The next frame, or `None` when nothing arrived within `timeout`.
-    ///
-    /// # Errors
-    /// Where the line could not be read.
-    fn receive(&self, timeout: Duration) -> Result<Option<Vec<u8>>>;
-}
 
 /// The master's side of a line.
 #[derive(Clone)]
@@ -197,6 +182,8 @@ impl Transport for HartTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::loopback::OnTheBus;
+    use serial::bus::Bus;
     use transport::loopback::Loopback;
     use transport::payload::edge_payloads;
 
@@ -208,9 +195,17 @@ mod tests {
         }
     }
 
-    fn master(line: &Arc<LoopbackLine>) -> HartTransport {
-        let line: Arc<dyn Line> = Arc::clone(line) as Arc<dyn Line>;
-        HartTransport::new(line, Address::Short(0)).timing_out_after(Duration::from_millis(10))
+    /// `device` alone on a fresh bus, and the bus.
+    fn on_a_bus(device: Device) -> (Arc<Bus>, Arc<OnTheBus>) {
+        let bus = Arc::new(Bus::new("loopback"));
+        let device = Arc::new(OnTheBus(Arc::new(device)));
+        bus.attach(Arc::clone(&device) as Arc<dyn serial::bus::Device>);
+        (bus, device)
+    }
+
+    fn master(bus: &Arc<Bus>, address: Address) -> HartTransport {
+        HartTransport::new(Arc::clone(bus) as Arc<dyn Line>, address)
+            .timing_out_after(Duration::from_millis(10))
     }
 
     #[test]
@@ -241,16 +236,14 @@ mod tests {
 
     #[test]
     fn the_device_identifies_itself_and_bursts_its_variable() {
-        let line = Arc::new(LoopbackLine::new(
-            Device::new(identity()).measuring(12, 4.5),
-        ));
-        let master = master(&line);
+        let (bus, device) = on_a_bus(Device::new(identity()).measuring(12, 4.5));
+        let master = master(&bus, Address::Short(0));
         assert_eq!(master.identify().expect("identify"), identity());
         assert!(
             master.receive().expect("quiet").is_empty(),
             "nothing is not an error"
         );
-        line.burst().expect("burst");
+        bus.speak(device.burst().expect("burst"));
         let arrived = master.receive().expect("burst");
         assert_eq!(arrived.len(), 1);
         assert_eq!(arrived[0].bytes, [12, 0x40, 0x90, 0, 0]);
@@ -261,25 +254,55 @@ mod tests {
     }
 
     #[test]
-    fn a_device_that_is_not_addressed_does_not_answer() {
-        let line = Arc::new(LoopbackLine::new(
-            Device::new(identity()).at_polling_address(3),
-        ));
-        let master = master(&line);
-        let error = master.identify().expect_err("silence");
+    fn on_one_bus_only_the_polled_device_answers() {
+        let (bus, _) = on_a_bus(Device::new(identity()).at_polling_address(3));
+        let other = Identity {
+            manufacturer: 0x26,
+            device_type: 0xe6,
+            device_id: 0x00_0001,
+        };
+        bus.attach(Arc::new(OnTheBus(Arc::new(
+            Device::new(other.clone()).at_polling_address(5),
+        ))));
+        let error = master(&bus, Address::Short(0))
+            .identify()
+            .expect_err("silence");
         assert!(error.retryable, "a device may be slow to answer");
         assert!(
-            master.send("hart://loopback/64", b"x").is_err(),
+            master(&bus, Address::Short(0))
+                .send("hart://loopback/64", b"x")
+                .is_err(),
             "not an address"
         );
-        let found = HartTransport::new(line, Address::Short(3));
-        assert_eq!(found.identify().expect("identify"), identity());
+        assert_eq!(
+            master(&bus, Address::Short(3)).identify().expect("three"),
+            identity()
+        );
+        assert_eq!(
+            master(&bus, Address::Short(5)).identify().expect("five"),
+            other
+        );
+    }
+
+    #[test]
+    fn a_frame_is_measured_by_its_preambles_address_and_count() {
+        let short = Frame::new(Kind::Stx, Address::Short(2), 0, &[1, 2]).expect("short");
+        let long = Frame::new(Kind::Ack, identity().address(), 1, &[9]).expect("long");
+        for frame in [short, long] {
+            let bytes = frame.encode();
+            let whole = (1..=bytes.len())
+                .find_map(|read| Frame::measure(&bytes[..read]).expect("measures"))
+                .expect("a length");
+            assert_eq!(whole, bytes.len());
+        }
+        assert!(Frame::measure(&[0xff, 0x02]).is_err(), "one preamble");
+        assert!(Frame::measure(&[0xff; 21]).is_err(), "no end of preambles");
     }
 
     #[test]
     fn a_line_has_no_artefact_to_claim() {
-        let line = Arc::new(LoopbackLine::new(Device::new(identity())));
-        let master = master(&line);
+        let (bus, _) = on_a_bus(Device::new(identity()));
+        let master = master(&bus, Address::Short(0));
         assert!(master.claims().is_none());
         assert_eq!(master.name(), "hart");
         assert!(master.directions().receives() && master.directions().sends());

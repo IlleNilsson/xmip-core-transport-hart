@@ -13,6 +13,8 @@ pub const PREAMBLE: u8 = 0xff;
 pub const PREAMBLES: usize = 5;
 /// The fewest preambles a frame is read with.
 pub const MIN_PREAMBLES: usize = 2;
+/// The most preambles HART sends before a delimiter.
+pub const MAX_PREAMBLES: usize = 20;
 /// The most data one frame carries: the byte count is one byte.
 pub const MAX_DATA: usize = 255;
 
@@ -195,6 +197,33 @@ impl Frame {
         let check = checksum(&out[PREAMBLES..]);
         out.push(check);
         out
+    }
+
+    /// How long the frame opening `read` is, once its bytes say: the rule a
+    /// serial line reads HART by ([`serial::Framing::Measured`]). The
+    /// preambles run until the delimiter, which says how long the address
+    /// is; the byte count after the command says the rest.
+    ///
+    /// # Errors
+    /// Fewer than two preambles, more than HART ever sends, or a delimiter
+    /// HART does not use.
+    pub fn measure(read: &[u8]) -> Result<Option<usize>> {
+        let preambles = read.iter().take_while(|b| **b == PREAMBLE).count();
+        if preambles > MAX_PREAMBLES {
+            return Err(protocol_error("more preambles than HART sends"));
+        }
+        let Some(&delimiter) = read.get(preambles) else {
+            return Ok(None);
+        };
+        if preambles < MIN_PREAMBLES {
+            return Err(protocol_error("fewer than two preambles"));
+        }
+        Kind::from_bits(delimiter)?;
+        let address = if delimiter & LONG_FRAME == 0 { 1 } else { 5 };
+        let count_at = preambles + 1 + address + 1;
+        Ok(read
+            .get(count_at)
+            .map(|count| count_at + 1 + usize::from(*count) + 1))
     }
 
     /// The frame at the start of `bytes`, and how many bytes it took.
