@@ -15,10 +15,10 @@
 use std::sync::Arc;
 
 use sdk::serial::{self, Bus};
+use transport::Transport;
 use transport::error::Result;
 use transport::held::Held;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
-use transport::{Arrived, Transport};
 
 use crate::HartTransport;
 use crate::device::{self, Device, Identity};
@@ -87,13 +87,9 @@ impl Loopback for HartTransport {
             .send(address, payload)
     }
 
-    fn unblock(&self, _address: &str) {
-        // The bus is in-process; nothing listens on a socket.
-    }
-
     /// In order on one thread: a serial line has one master, so the write
     /// goes first and the read-back finds what it left.
-    fn round(&self, payload: &[u8]) -> Result<Arrived> {
-        self.round_in_order(payload)
+    fn exchanges_in_order(&self) -> bool {
+        true
     }
 }
