@@ -36,7 +36,11 @@ pub use device::{Device, Identity};
 pub use frame::{Address, Frame, Kind};
 use transport::error::{Result, protocol_error};
 use transport::line::Line;
-use transport::{Arrived, Directions, Transport};
+use transport::{Arrived, Configured, Directions, Transport};
+use xcore::settings::{Applies, Fixed, Presence, Read, Setting, Settings};
+
+/// How long a master waits for a device's answer unless a Location says.
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// The master's side of a line.
 #[derive(Clone)]
@@ -53,7 +57,7 @@ impl HartTransport {
         Self {
             line,
             address,
-            timeout: Duration::from_secs(1),
+            timeout: DEFAULT_TIMEOUT,
         }
     }
 
@@ -179,6 +183,49 @@ impl Transport for HartTransport {
     }
 }
 
+impl Configured for HartTransport {
+    /// The address is the line the master speaks on, by its name. This
+    /// build carries the SDK's in-process multi-drop bus only, `loopback`;
+    /// a HART modem on a serial port is a line the node brings (open
+    /// problem 24), and every other name is refused until it does.
+    const SETTINGS: &'static Settings = &Settings {
+        technology: env!("CARGO_PKG_NAME"),
+        settings: &[
+            Setting {
+                name: "device",
+                kind: xcore::settings::Kind::Address,
+                presence: Presence::Required,
+                meaning: "The device a Stream is written to unless the target names another: \
+                          a polling address, 7, or a unique one, 26-e5-0a1b2c.",
+                applies: Applies::Send,
+            },
+            Setting {
+                name: "timeout",
+                kind: xcore::settings::Kind::Duration,
+                presence: Presence::Default(Fixed::Duration(DEFAULT_TIMEOUT)),
+                meaning: "How long a device's answer, or a quiet line, is waited on.",
+                applies: Applies::Both,
+            },
+        ],
+    };
+
+    /// A Receive Location takes whatever the line carries and writes to no
+    /// device, so polling address 0 stands where a Send Location's is.
+    fn configured(address: &str, settings: &Read) -> Result<Self> {
+        if address != "loopback" {
+            return Err(protocol_error(format!(
+                "{address:?} is not a line this build carries: only the in-process \
+                 \"loopback\" bus; a HART modem's serial line is the node's to bring"
+            )));
+        }
+        let device = settings
+            .optional_text("device")
+            .map_or(Ok(Address::Short(0)), Address::parse)?;
+        Ok(Self::new(Arc::new(sdk::serial::Bus::new(address)), device)
+            .timing_out_after(settings.duration("timeout")))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,6 +233,33 @@ mod tests {
     use sdk::serial::Bus;
     use transport::loopback::Loopback;
     use transport::payload::edge_payloads;
+    use xcore::settings::Given;
+
+    #[test]
+    fn hart_declares_its_settings_and_reads_through_them() {
+        assert_eq!(HartTransport::SETTINGS.problems(), Vec::<String>::new());
+        let given = [
+            (
+                "device".to_string(),
+                Given::Text("26-e5-0a1b2c".to_string()),
+            ),
+            ("timeout".to_string(), Given::Text("250ms".to_string())),
+        ];
+        let built = HartTransport::open("loopback", Applies::Send, &given).expect("built");
+        assert_eq!(built.address, identity().address());
+        assert_eq!(built.timeout, Duration::from_millis(250));
+        let receiving = HartTransport::open("loopback", Applies::Receive, &[]).expect("receiving");
+        assert_eq!(receiving.timeout, DEFAULT_TIMEOUT);
+        let Err(refused) = HartTransport::open("loopback", Applies::Send, &given[1..]) else {
+            panic!("a Send Location's device is required");
+        };
+        assert!(
+            refused.message.contains("\"device\""),
+            "{}",
+            refused.message
+        );
+        assert!(HartTransport::open("COM3", Applies::Receive, &[]).is_err());
+    }
 
     fn identity() -> Identity {
         Identity {
