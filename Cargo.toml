@@ -19,6 +19,9 @@ path = "src/lib.rs"
 # line; the line is the capability's, carried by a modem on a serial port or
 # by the SDK's simulated multi-drop bus (open problem 24).
 transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
+# The settings this technology declares (xcore::settings), read through
+# transport::Configured (ADR-0064, amendment 2026-09-26).
+xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
 sdk = { package = "xmip-core-sdk", git = "https://github.com/IlleNilsson/xmip-core-sdk", branch = "main" }
 
 [dev-dependencies]
@@ -36,3 +39,6 @@ missing_errors_doc = "warn"
 missing_panics_doc = "warn"
 unwrap_used = "warn"
 expect_used = "allow"
+
+[profile.dev.package."*"]
+opt-level = 3
