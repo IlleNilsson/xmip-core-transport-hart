@@ -34,6 +34,7 @@ use std::time::Duration;
 
 pub use device::{Device, Identity};
 pub use frame::{Address, Frame, Kind};
+use net::Target;
 use transport::error::{Result, protocol_error};
 use transport::line::Line;
 use transport::{Arrived, Configured, Directions, Transport};
@@ -175,10 +176,11 @@ impl Transport for HartTransport {
     /// `target` may name an address, `hart://line/7`, overriding the
     /// transport's.
     fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
-        let address = match transport::socket::target("hart", target) {
-            Some((_, address)) if !address.is_empty() => Address::parse(address)?,
-            _ => self.address.clone(),
-        };
+        let address =
+            match Target::under(&["hart"], target).map(|named| (named.authority(), named.path())) {
+                Some((_, address)) if !address.is_empty() => Address::parse(address)?,
+                _ => self.address.clone(),
+            };
         self.write_stream(&address, bytes)
     }
 }

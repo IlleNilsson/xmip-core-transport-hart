@@ -35,8 +35,8 @@ pub const MAX_CHUNK: usize = 252;
 
 /// The response codes a device answers with in the first status byte.
 pub const OK: u8 = 0;
-pub const INVALID_SELECTION: u8 = 2;
-pub const TOO_FEW_BYTES: u8 = 5;
+const INVALID_SELECTION: u8 = 2;
+const TOO_FEW_BYTES: u8 = 5;
 pub const NOT_IMPLEMENTED: u8 = 64;
 
 /// What command 0 says.
@@ -158,7 +158,7 @@ impl Device {
 
     /// Command 1's answer: the units code and the value as a float.
     #[must_use]
-    pub fn primary_variable(&self) -> Vec<u8> {
+    fn primary_variable(&self) -> Vec<u8> {
         let mut out = vec![self.units];
         out.extend_from_slice(&self.primary_variable.to_be_bytes());
         out
