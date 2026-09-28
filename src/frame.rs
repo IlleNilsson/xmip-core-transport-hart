@@ -8,13 +8,13 @@ use std::fmt;
 use transport::error::{Result, protocol_error};
 
 /// The byte a frame opens with: at least two of them, five by default.
-pub const PREAMBLE: u8 = 0xff;
+const PREAMBLE: u8 = 0xff;
 /// How many preambles a frame is sent with.
-pub const PREAMBLES: usize = 5;
+const PREAMBLES: usize = 5;
 /// The fewest preambles a frame is read with.
-pub const MIN_PREAMBLES: usize = 2;
+const MIN_PREAMBLES: usize = 2;
 /// The most preambles HART sends before a delimiter.
-pub const MAX_PREAMBLES: usize = 20;
+const MAX_PREAMBLES: usize = 20;
 /// The most data one frame carries: the byte count is one byte.
 pub const MAX_DATA: usize = 255;
 
@@ -95,9 +95,9 @@ impl Address {
                 Ok(Self::Short(polling))
             }
             (Some(device_type), Some(device_id)) => Ok(Self::Long {
-                manufacturer: u8::from_str_radix(first, 16).map_err(|_| refused())?,
-                device_type: u8::from_str_radix(device_type, 16).map_err(|_| refused())?,
-                device_id: u32::from_str_radix(device_id, 16).map_err(|_| refused())?,
+                manufacturer: codec::hex::number(first).map_err(|_| refused())?,
+                device_type: codec::hex::number(device_type).map_err(|_| refused())?,
+                device_id: codec::hex::number(device_id).map_err(|_| refused())?,
             }),
             _ => Err(refused()),
         }
