@@ -6,6 +6,13 @@ A send target is read by `net::Target` in [xmip-core-library-net](https://github
 
 A `0x` number in a target is read by `codec::hex::prefixed_number` in [xmip-core-library-codec](https://github.com/IlleNilsson/xmip-core-library-codec), which refuses a sign; until 2026-09-28 it was read with `from_str_radix`, which took `0x+7e8`.
 
+## Acknowledgement
+
+Acceptance is at-most-once here. A receive takes what the line carries, a
+burst-mode frame the device sends on its own, which nobody answers: it is off
+the line as it is read, and nobody is left to tell how the receive cycle
+ended. Each frame's data arrives whole.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it
