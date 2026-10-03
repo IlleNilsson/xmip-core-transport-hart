@@ -22,6 +22,10 @@
 //! carries the same commands over the air and rides on this crate's
 //! [`device`] for them.
 //!
+//! **Acceptance is at-most-once here** ([`AT_MOST_ONCE`]): a receive takes
+//! what the line carries — a burst-mode frame, which the device sends on
+//! its own and nobody answers — whole, off the line as it is read.
+//!
 //! The origin URI carries what the frame knew:
 //! `hart://loopback/26-e5-0a1b2c?command=1&burst=true`.
 
@@ -37,8 +41,13 @@ pub use frame::{Address, Frame, Kind};
 use net::Target;
 use transport::error::{Result, protocol_error};
 use transport::line::Line;
-use transport::{Arrived, Configured, Directions, Transport};
+use transport::{Acknowledgement, Arrived, Configured, Directions, Taken, Transport};
 use xcore::settings::{Applies, Fixed, Presence, Read, Setting, Settings};
+
+/// Why a frame taken off the line cannot be acknowledged after the receive
+/// cycle.
+pub const AT_MOST_ONCE: &str = "a HART burst-mode frame is answered by nobody: the device \
+                                sends it on its own and the master only listens";
 
 /// How long a master waits for a device's answer unless a Location says.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(1);
@@ -116,11 +125,12 @@ impl HartTransport {
         Ok(())
     }
 
-    /// Read the Stream the device holds, a chunk per request.
+    /// Read the Stream the device holds, whole, a chunk per request. The
+    /// device keeps holding it.
     ///
     /// # Errors
     /// As [`Self::request`], or a device that never says "last".
-    pub fn read_stream(&self) -> Result<Arrived> {
+    pub fn read_stream(&self) -> Result<Taken> {
         let command = u8::try_from(device::READ_STREAM).unwrap_or(u8::MAX);
         let mut bytes = Vec::new();
         for index in 0..u32::MAX {
@@ -129,14 +139,15 @@ impl HartTransport {
             bytes.extend_from_slice(chunk);
             if last {
                 let origin = format!("{}?command={command}", self.origin(&self.address));
-                return Ok(Arrived::new(origin, bytes));
+                return Ok(Taken::new(origin, bytes));
             }
         }
         Err(protocol_error("a Stream that never ends"))
     }
 
-    /// The next frame on the line as a Stream — a burst, or an answer
-    /// nobody was waiting for — or `None` when the line is quiet.
+    /// The next frame on the line as a Stream, whole — a burst, or an
+    /// answer nobody was waiting for — or `None` when the line is quiet.
+    /// Acceptance is at-most-once ([`AT_MOST_ONCE`]).
     ///
     /// # Errors
     /// Where the line could not be read or carried something that is not a
@@ -152,9 +163,10 @@ impl HartTransport {
             frame.command,
             frame.kind == Kind::Back
         );
-        Ok(Some(Arrived::new(
+        Ok(Some(Arrived::whole(
             origin,
             device::answered(&frame.data)?.to_vec(),
+            Acknowledgement::at_most_once(AT_MOST_ONCE),
         )))
     }
 }
@@ -168,7 +180,12 @@ impl Transport for HartTransport {
         Directions::BOTH
     }
 
-    /// Nothing on the line is not an error: an empty vector.
+    fn arrivals(&self) -> transport::Arrivals {
+        transport::Arrivals::Ordered("one line or bus, answered in the order it speaks")
+    }
+
+    /// Nothing on the line is not an error: an empty vector. Acceptance is
+    /// at-most-once here: a burst is answered by nobody ([`AT_MOST_ONCE`]).
     fn receive(&self) -> Result<Vec<Arrived>> {
         Ok(self.receive_one()?.into_iter().collect())
     }
@@ -320,11 +337,14 @@ mod tests {
             "nothing is not an error"
         );
         bus.speak(device.burst().expect("burst"));
-        let arrived = master.receive().expect("burst");
+        let mut arrived = master.receive().expect("burst");
         assert_eq!(arrived.len(), 1);
-        assert_eq!(arrived[0].bytes, [12, 0x40, 0x90, 0, 0]);
+        let arrived = arrived.remove(0);
+        assert!(!arrived.defers(), "a burst is at-most-once");
+        let arrived = arrived.taken().expect("taken");
+        assert_eq!(arrived.bytes, [12, 0x40, 0x90, 0, 0]);
         assert_eq!(
-            arrived[0].origin_uri,
+            arrived.origin_uri,
             "hart://loopback/26-e5-0a1b2c?command=1&burst=true"
         );
     }
