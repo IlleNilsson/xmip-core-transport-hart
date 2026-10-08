@@ -36,6 +36,7 @@ pub mod loopback;
 use std::sync::Arc;
 use std::time::Duration;
 
+use context::property::HART_ADDRESS;
 pub use device::{Device, Identity};
 pub use frame::{Address, Frame, Kind};
 use net::Target;
@@ -139,7 +140,9 @@ impl HartTransport {
             bytes.extend_from_slice(chunk);
             if last {
                 let origin = format!("{}?command={command}", self.origin(&self.address));
-                return Ok(Taken::new(origin, bytes));
+                return Ok(
+                    Taken::new(origin, bytes).observing(HART_ADDRESS, self.address.to_string())
+                );
             }
         }
         Err(protocol_error("a Stream that never ends"))
@@ -157,17 +160,21 @@ impl HartTransport {
             return Ok(None);
         };
         let frame = Frame::decode(&bytes)?;
+        let address = frame.address.to_string();
         let origin = format!(
             "{}?command={}&burst={}",
             self.origin(&frame.address),
             frame.command,
             frame.kind == Kind::Back
         );
-        Ok(Some(Arrived::whole(
-            origin,
-            device::answered(&frame.data)?.to_vec(),
-            Acknowledgement::at_most_once(AT_MOST_ONCE),
-        )))
+        Ok(Some(
+            Arrived::whole(
+                origin,
+                device::answered(&frame.data)?.to_vec(),
+                Acknowledgement::at_most_once(AT_MOST_ONCE),
+            )
+            .observing(HART_ADDRESS, address),
+        ))
     }
 }
 
