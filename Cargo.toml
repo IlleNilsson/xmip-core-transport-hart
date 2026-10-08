@@ -19,6 +19,10 @@ path = "src/lib.rs"
 # line; the line is the capability's, carried by a modem on a serial port or
 # by the SDK's simulated multi-drop bus (open problem 24).
 transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
+# The names what this technology observed of a sender travels under, which
+# the identity gates read (`context::property`, ADR-0019 amendment
+# 2026-10-06).
+context = { package = "xmip-core-context", git = "https://github.com/IlleNilsson/xmip-core-context", branch = "main" }
 # A target read as a URI writes it (`net::Target`).
 net = { package = "xmip-core-library-net", git = "https://github.com/IlleNilsson/xmip-core-library-net", branch = "main" }
 # The `0x` number a target names (`codec::hex`).

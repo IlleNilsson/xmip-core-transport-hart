@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use sdk::serial::{self, Bus};
+use transport::ArrivalIdentity;
 use transport::Transport;
 use transport::error::Result;
 use transport::held::Held;
@@ -71,6 +72,10 @@ impl HartTransport {
 }
 
 impl Loopback for HartTransport {
+    fn arrival_identity(&self) -> ArrivalIdentity {
+        ArrivalIdentity::Named(&[context::property::HART_ADDRESS])
+    }
+
     /// The device on the line, holding what the master wrote until it is read
     /// back.
     fn far_end(&self) -> Result<Box<dyn FarEnd>> {
