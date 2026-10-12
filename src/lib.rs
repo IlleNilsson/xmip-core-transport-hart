@@ -191,6 +191,10 @@ impl Transport for HartTransport {
         transport::Arrivals::Ordered("one line or bus, answered in the order it speaks")
     }
 
+    fn waiting(&self) -> transport::Waiting {
+        transport::Waiting::Waits("a read of the line waits for a frame until the timeout")
+    }
+
     /// Nothing on the line is not an error: an empty vector. Acceptance is
     /// at-most-once here: a burst is answered by nobody ([`AT_MOST_ONCE`]).
     fn receive(&self) -> Result<Vec<Arrived>> {
