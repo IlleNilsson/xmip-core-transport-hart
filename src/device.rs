@@ -341,7 +341,7 @@ mod tests {
         let device = device();
         assert_eq!(write_requests(&[], 100), vec![vec![FIRST | LAST]]);
         let _ = device.answer(WRITE_STREAM, &[FIRST | LAST]);
-        assert!(device.held().is_empty());
+        assert_eq!(device.held(), [] as [u8; 0]);
         let answer = device.answer(READ_STREAM, &read_request(0));
         assert_eq!(answered(&answer).expect("ok"), [FIRST | LAST]);
     }

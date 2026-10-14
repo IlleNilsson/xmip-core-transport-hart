@@ -324,7 +324,7 @@ mod tests {
         master
             .send("hart://loopback/26-e5-0a1b2c", b"")
             .expect("empty");
-        assert!(master.read_stream().expect("reading").bytes.is_empty());
+        assert_eq!(master.read_stream().expect("reading").bytes, [] as [u8; 0]);
         assert!(master.ceiling().is_none());
         assert!(master.refuses(&long).is_none());
     }
