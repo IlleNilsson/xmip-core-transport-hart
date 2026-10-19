@@ -197,13 +197,18 @@ impl Transport for HartTransport {
 
     /// Nothing on the line is not an error: an empty vector. Acceptance is
     /// at-most-once here: a burst is answered by nobody ([`AT_MOST_ONCE`]).
-    fn receive(&self) -> Result<Vec<Arrived>> {
+    fn receive_up_to(&self, _most: usize) -> Result<Vec<Arrived>> {
         Ok(self.receive_one()?.into_iter().collect())
+    }
+
+    fn sending(&self) -> transport::Sending {
+        transport::Sending::Gathered("one HART frame carries the whole body")
     }
 
     /// `target` may name an address, `hart://line/7`, overriding the
     /// transport's.
-    fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
+    fn send_from(&self, target: &str, outgoing: transport::Outgoing<'_>) -> Result<()> {
+        let bytes: &[u8] = &outgoing.gather()?;
         let address =
             match Target::under(&["hart"], target).map(|named| (named.authority(), named.path())) {
                 Some((_, address)) if !address.is_empty() => Address::parse(address)?,
