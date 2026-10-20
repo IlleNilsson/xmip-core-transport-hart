@@ -412,7 +412,7 @@ mod tests {
     }
 
     #[test]
-    fn a_line_has_no_artefact_to_claim() {
+    fn a_line_has_no_artifact_to_claim() {
         let (bus, _) = on_a_bus(Device::new(identity()));
         let master = master(&bus, Address::Short(0));
         assert!(master.claims().is_none());
