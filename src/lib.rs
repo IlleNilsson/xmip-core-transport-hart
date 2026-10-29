@@ -209,11 +209,12 @@ impl Transport for HartTransport {
     /// transport's.
     fn send_from(&self, target: &str, outgoing: transport::Outgoing<'_>) -> Result<()> {
         let bytes: &[u8] = &outgoing.gather()?;
-        let address =
-            match Target::under(&["hart"], target).map(|named| (named.authority(), named.path())) {
-                Some((_, address)) if !address.is_empty() => Address::parse(address)?,
-                _ => self.address.clone(),
-            };
+        let address = match Target::under(Self::SCHEMES, target)
+            .map(|named| (named.authority(), named.path()))
+        {
+            Some((_, address)) if !address.is_empty() => Address::parse(address)?,
+            _ => self.address.clone(),
+        };
         self.write_stream(&address, bytes)
     }
 }
@@ -243,6 +244,9 @@ impl Configured for HartTransport {
             },
         ],
     };
+
+    /// The schemes a Location's address is entered with to choose this technology.
+    const SCHEMES: &'static [&'static str] = &["hart"];
 
     /// A Receive Location takes whatever the line carries and writes to no
     /// device, so polling address 0 stands where a Send Location's is.
