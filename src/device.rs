@@ -10,6 +10,7 @@
 //! and it is what a Location sends.
 
 use std::sync::Mutex;
+use xcore::lock::Locked;
 
 use transport::error::{Result, protocol_error};
 
@@ -150,10 +151,7 @@ impl Device {
     /// The Stream the device holds, as the last complete write left it.
     #[must_use]
     pub fn held(&self) -> Vec<u8> {
-        self.held
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+        self.held.locked().clone()
     }
 
     /// Command 1's answer: the units code and the value as a float.
@@ -184,19 +182,13 @@ impl Device {
         let Some((flags, chunk)) = data.split_first() else {
             return TOO_FEW_BYTES;
         };
-        let mut arriving = self
-            .arriving
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut arriving = self.arriving.locked();
         if flags & FIRST != 0 {
             arriving.clear();
         }
         arriving.extend_from_slice(chunk);
         if flags & LAST != 0 {
-            *self
-                .held
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = std::mem::take(&mut arriving);
+            *self.held.locked() = std::mem::take(&mut arriving);
         }
         OK
     }
