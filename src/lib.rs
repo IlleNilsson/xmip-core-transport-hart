@@ -43,7 +43,7 @@ use net::Target;
 use transport::error::{Result, protocol_error};
 use transport::line::Line;
 use transport::{Acknowledgement, Arrived, Configured, Directions, Taken, Transport};
-use xcore::settings::{Applies, Fixed, Presence, Read, Setting, Settings};
+use xcore::settings::{Applies, Presence, Read, Setting, Settings};
 
 /// Why a frame taken off the line cannot be acknowledged after the receive
 /// cycle.
@@ -70,13 +70,6 @@ impl HartTransport {
             address,
             timeout: DEFAULT_TIMEOUT,
         }
-    }
-
-    /// Give up on a device that does not answer within `timeout`.
-    #[must_use]
-    pub const fn timing_out_after(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
-        self
     }
 
     /// `hart://<line>/<address>`.
@@ -235,18 +228,20 @@ impl Configured for HartTransport {
                           a polling address, 7, or a unique one, 26-e5-0a1b2c.",
                 applies: Applies::Send,
             },
-            Setting {
-                name: "timeout",
-                kind: xcore::settings::Kind::Duration,
-                presence: Presence::Default(Fixed::Duration(DEFAULT_TIMEOUT)),
-                meaning: "How long a device's answer, or a quiet line, is waited on.",
-                applies: Applies::Both,
-            },
+            transport::configured::timeout(
+                Applies::Both,
+                Some(DEFAULT_TIMEOUT),
+                "How long a device's answer, or a quiet line, is waited on.",
+            ),
         ],
     };
 
     /// The schemes a Location's address is entered with to choose this technology.
     const SCHEMES: &'static [&'static str] = &["hart"];
+
+    fn timeout_kept(&mut self) -> Option<&mut dyn transport::configured::TimeoutKept> {
+        Some(&mut self.timeout)
+    }
 
     /// A Receive Location takes whatever the line carries and writes to no
     /// device, so polling address 0 stands where a Send Location's is.
@@ -260,8 +255,7 @@ impl Configured for HartTransport {
         let device = settings
             .optional_text("device")
             .map_or(Ok(Address::Short(0)), Address::parse)?;
-        Ok(Self::new(Arc::new(sdk::serial::Bus::new(address)), device)
-            .timing_out_after(settings.duration("timeout")))
+        Ok(Self::new(Arc::new(sdk::serial::Bus::new(address)), device))
     }
 }
 
