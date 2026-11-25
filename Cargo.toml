@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/IlleNilsson/xmip-core-transport-hart"
-description = "HART transport: the field device protocol on the 4-20 mA loop — short and long frames with an XOR checksum, commands 0 and 1, a Stream written and read in chunks through device-specific commands, burst mode taken as it comes; field devices on the SDK's simulated multi-drop bus stand in for the modem. A xmip-core-transport technology."
+description = "HART transport: the field device protocol on the 4-20 mA loop — short and long frames with an XOR checksum, commands 0 and 1, a Stream written and read in chunks through device-specific commands, burst mode taken as it comes; over a modem's serial port, or field devices on the SDK's simulated multi-drop bus. A xmip-core-transport technology."
 publish = false
 
 [lib]
@@ -28,6 +28,9 @@ codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNil
 # transport::Configured (ADR-0064, amendment 2026-09-26).
 xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
 sdk = { package = "xmip-core-sdk", git = "https://github.com/IlleNilsson/xmip-core-sdk", branch = "main" }
+# The modem's serial port a Location names, framed by the length a frame
+# says (`Framing::Measured`), as M-Bus reads its port.
+serial = { package = "xmip-core-transport-serial", git = "https://github.com/IlleNilsson/xmip-core-transport-serial", branch = "main" }
 
 [dev-dependencies]
 # The loopback payloads the tests drive, from the capability's test

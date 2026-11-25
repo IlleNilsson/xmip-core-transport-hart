@@ -42,7 +42,7 @@ pub use frame::{Address, Frame, Kind};
 use net::Target;
 use transport::error::{Result, protocol_error};
 use transport::line::Line;
-use transport::{Acknowledgement, Arrived, Configured, Directions, Taken, Transport};
+use transport::{Acknowledgement, Arrived, Configured, Directions, Sharing, Taken, Transport};
 use xcore::settings::{Applies, Presence, Read, Setting, Settings};
 
 /// Why a frame taken off the line cannot be acknowledged after the receive
@@ -52,6 +52,9 @@ pub const AT_MOST_ONCE: &str = "a HART burst-mode frame is answered by nobody: t
 
 /// How long a master waits for a device's answer unless a Location says.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// The rate a HART modem's line runs at: Bell 202 FSK, 1200 baud.
+pub const BAUD: u32 = 1200;
 
 /// The master's side of a line.
 #[derive(Clone)]
@@ -213,10 +216,9 @@ impl Transport for HartTransport {
 }
 
 impl Configured for HartTransport {
-    /// The address is the line the master speaks on, by its name. This
-    /// build carries the SDK's in-process multi-drop bus only, `loopback`;
-    /// a HART modem on a serial port is a line the node brings (open
-    /// problem 24), and every other name is refused until it does.
+    /// The address is the line the master speaks on: a HART modem's serial
+    /// port, `/dev/ttyUSB0` or `COM3`, or the SDK's in-process multi-drop
+    /// bus, `loopback` (open problem 24).
     const SETTINGS: &'static Settings = &Settings {
         technology: env!("CARGO_PKG_NAME"),
         settings: &[
@@ -243,19 +245,34 @@ impl Configured for HartTransport {
         Some(&mut self.timeout)
     }
 
-    /// A Receive Location takes whatever the line carries and writes to no
-    /// device, so polling address 0 stands where a Send Location's is.
-    fn configured(address: &str, settings: &Read) -> Result<Self> {
-        if address != "loopback" {
-            return Err(protocol_error(format!(
-                "{address:?} is not a line this build carries: only the in-process \
-                 \"loopback\" bus; a HART modem's serial line is the node's to bring"
-            )));
+    /// The line on what the Locations of the node share: a serial port
+    /// takes the one port its device has on the node, so every field device
+    /// on one loop is asked through it; the in-process bus stays as it is.
+    fn shared_by(mut self, sharing: &Arc<dyn Sharing>) -> Self {
+        if let Some(line) = self.line.shared_on(sharing) {
+            self.line = line;
         }
+        self
+    }
+
+    /// A Receive Location takes whatever the line carries and writes to no
+    /// device, so polling address 0 stands where a Send Location's is. The
+    /// line is the in-process bus where the address is `loopback`, and the
+    /// serial port the address names else, at HART's [`BAUD`], each frame
+    /// read by the length it says ([`Frame::measure`]); until 2026-11-25
+    /// every address but `loopback` was refused, and no node reached a
+    /// device (the owner, 2026-11-25: *just do your best for now*).
+    fn configured(address: &str, settings: &Read) -> Result<Self> {
         let device = settings
             .optional_text("device")
             .map_or(Ok(Address::Short(0)), Address::parse)?;
-        Ok(Self::new(Arc::new(sdk::serial::Bus::new(address)), device))
+        let line: Arc<dyn Line> = if address == "loopback" {
+            Arc::new(sdk::serial::Bus::new(address))
+        } else {
+            let framing = serial::Framing::Measured(Frame::measure);
+            Arc::new(serial::SerialTransport::new(address, BAUD).framed(framing))
+        };
+        Ok(Self::new(line, device))
     }
 }
 
@@ -291,7 +308,17 @@ mod tests {
             "{}",
             refused.message
         );
-        assert!(HartTransport::open("COM3", Applies::Receive, &[]).is_err());
+    }
+
+    /// A Location on a modem's serial port takes that port as its line (the
+    /// owner, 2026-11-25: *just do your best for now*): until 2026-11-25
+    /// every address but `loopback` was refused, and no node reached a
+    /// device. The root's service test writes through one to a field
+    /// device on a pseudo-terminal.
+    #[test]
+    fn a_location_on_a_serial_port_takes_the_port_as_its_line() {
+        let modem = HartTransport::open("COM3", Applies::Receive, &[]).expect("a modem's port");
+        assert_eq!(modem.origin(&Address::Short(0)), "hart://COM3/0");
     }
 
     fn identity() -> Identity {
