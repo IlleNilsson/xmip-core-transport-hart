@@ -15,6 +15,10 @@ burst-mode frame the device sends on its own, which nobody answers: it is off
 the line as it is read, and nobody is left to tell how the receive cycle
 ended. Each frame's data arrives whole.
 
+## The declaration
+
+What a Location of this technology is configured with is two `const`s in its `declaration` module, `src/declaration.rs`, beside the code, which `Configured` reads (ADR-0064, amendment 2026-11-26): `declaration::SETTINGS`, `device` and `timeout`, and `SCHEMES`, `hart`; `timeout`'s default, `declaration::DEFAULT_TIMEOUT`, is declared there too, the code takes it from there, and the crate root names it as before. Built with its `declaration` feature alone (`--no-default-features --features declaration`), the crate is those and nothing more: its code and every crate the code is built on — the serial technology and the SDK's multi-drop bus among them — are behind the default feature. So the library the surfaces load can carry it without the code, for the language server and the desktop to suggest and check a HART Location's settings though no node in their process loaded the technology, once the gathering crate of open problem 48 links it. `test/Declaration.Test.ps1` in the estate holds that the declaration builds nothing the transport capability does not.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it

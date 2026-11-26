@@ -28,35 +28,57 @@
 //!
 //! The origin URI carries what the frame knew:
 //! `hart://loopback/26-e5-0a1b2c?command=1&burst=true`.
+//!
+//! **Built with its `declaration` feature alone** the crate is
+//! [`declaration`], what a Location of it is configured with, and none of
+//! the code above, which is behind the default feature: what the surfaces'
+//! library carries (ADR-0064, amendment 2026-11-26).
 
+#[cfg(feature = "declaration")]
+pub mod declaration;
+#[cfg(feature = "default")]
 pub mod device;
+#[cfg(feature = "default")]
 pub mod frame;
+#[cfg(feature = "default")]
 pub mod loopback;
 
+#[cfg(feature = "default")]
 use std::sync::Arc;
+#[cfg(feature = "default")]
 use std::time::Duration;
 
+#[cfg(feature = "default")]
 use context::property::HART_ADDRESS;
+#[cfg(feature = "declaration")]
+pub use declaration::DEFAULT_TIMEOUT;
+#[cfg(feature = "default")]
 pub use device::{Device, Identity};
+#[cfg(feature = "default")]
 pub use frame::{Address, Frame, Kind};
+#[cfg(feature = "default")]
 use net::Target;
+#[cfg(feature = "default")]
 use transport::error::{Result, protocol_error};
+#[cfg(feature = "default")]
 use transport::line::Line;
+#[cfg(feature = "default")]
 use transport::{Acknowledgement, Arrived, Configured, Directions, Sharing, Taken, Transport};
-use xcore::settings::{Applies, Presence, Read, Setting, Settings};
+#[cfg(feature = "default")]
+use xcore::settings::{Read, Settings};
 
 /// Why a frame taken off the line cannot be acknowledged after the receive
 /// cycle.
+#[cfg(feature = "default")]
 pub const AT_MOST_ONCE: &str = "a HART burst-mode frame is answered by nobody: the device \
                                 sends it on its own and the master only listens";
 
-/// How long a master waits for a device's answer unless a Location says.
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(1);
-
 /// The rate a HART modem's line runs at: Bell 202 FSK, 1200 baud.
+#[cfg(feature = "default")]
 pub const BAUD: u32 = 1200;
 
 /// The master's side of a line.
+#[cfg(feature = "default")]
 #[derive(Clone)]
 pub struct HartTransport {
     line: Arc<dyn Line>,
@@ -64,6 +86,7 @@ pub struct HartTransport {
     timeout: Duration,
 }
 
+#[cfg(feature = "default")]
 impl HartTransport {
     /// A master on `line`, talking to the device at `address`.
     #[must_use]
@@ -174,6 +197,7 @@ impl HartTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Transport for HartTransport {
     fn name(&self) -> &'static str {
         "hart"
@@ -215,31 +239,10 @@ impl Transport for HartTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Configured for HartTransport {
-    /// The address is the line the master speaks on: a HART modem's serial
-    /// port, `/dev/ttyUSB0` or `COM3`, or the SDK's in-process multi-drop
-    /// bus, `loopback` (open problem 24).
-    const SETTINGS: &'static Settings = &Settings {
-        technology: env!("CARGO_PKG_NAME"),
-        settings: &[
-            Setting {
-                name: "device",
-                kind: xcore::settings::Kind::Address,
-                presence: Presence::Required,
-                meaning: "The device a Stream is written to unless the target names another: \
-                          a polling address, 7, or a unique one, 26-e5-0a1b2c.",
-                applies: Applies::Send,
-            },
-            transport::configured::timeout(
-                Applies::Both,
-                Some(DEFAULT_TIMEOUT),
-                "How long a device's answer, or a quiet line, is waited on.",
-            ),
-        ],
-    };
-
-    /// The schemes a Location's address is entered with to choose this technology.
-    const SCHEMES: &'static [&'static str] = &["hart"];
+    const SETTINGS: &'static Settings = declaration::SETTINGS;
+    const SCHEMES: &'static [&'static str] = declaration::SCHEMES;
 
     fn timeout_kept(&mut self) -> Option<&mut dyn transport::configured::TimeoutKept> {
         Some(&mut self.timeout)
@@ -283,7 +286,7 @@ mod tests {
     use sdk::serial::Bus;
     use transport::loopback::Loopback;
     use transport::payload::edge_payloads;
-    use xcore::settings::Given;
+    use xcore::settings::{Applies, Given};
 
     #[test]
     fn hart_declares_its_settings_and_reads_through_them() {
