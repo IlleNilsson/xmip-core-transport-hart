@@ -34,14 +34,10 @@ sdk = { package = "xmip-core-sdk", git = "https://github.com/IlleNilsson/xmip-co
 serial = { package = "xmip-core-transport-serial", git = "https://github.com/IlleNilsson/xmip-core-transport-serial", branch = "main", optional = true }
 
 [features]
-# The technology: its code, everything it is built on, and its declaration.
-# Without it the crate is its declaration alone (ADR-0064, amendments
-# 2026-10-22 and 2026-11-26).
+# The code and its declaration: the transport guide's "The declaration",
+# module/core/capability/transport/doc/adding-a-transport.md.
 default = ["declaration", "dep:context", "dep:net", "dep:codec", "dep:sdk", "dep:serial"]
-# The declaration alone: what a Location of this technology is configured
-# with, `declaration::SETTINGS` and `SCHEMES`, with the wait its default
-# names, and none of the code — what the surfaces' library is to carry (open
-# problem 48).
+# The declaration alone, with the wait its default names.
 declaration = []
 
 [dev-dependencies]
