@@ -16,22 +16,22 @@ path = "src/lib.rs"
 # line; the line is the capability's, carried by a modem on a serial port or
 # by the SDK's simulated multi-drop bus (open problem 24). Its declaration
 # takes the capability's `timeout` (`transport::configured::timeout`).
-transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
+transport = { workspace = true }
 # The names what this technology observed of a sender travels under, which
 # the identity gates read (`context::property`, ADR-0019 amendment
 # 2026-10-06).
-context = { package = "xmip-core-context", git = "https://github.com/IlleNilsson/xmip-core-context", branch = "main", optional = true }
+context = { workspace = true, optional = true }
 # A target read as a URI writes it (`net::Target`).
-net = { package = "xmip-core-library-net", git = "https://github.com/IlleNilsson/xmip-core-library-net", branch = "main", optional = true }
+net = { workspace = true, optional = true }
 # The `0x` number a target names (`codec::hex`).
-codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main", optional = true }
+codec = { workspace = true, optional = true }
 # The settings this technology declares (xcore::settings), read through
 # transport::Configured (ADR-0064, amendment 2026-09-26).
-xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
-sdk = { package = "xmip-core-sdk", git = "https://github.com/IlleNilsson/xmip-core-sdk", branch = "main", optional = true }
+xcore = { workspace = true }
+sdk = { workspace = true, optional = true }
 # The modem's serial port a Location names, framed by the length a frame
 # says (`Framing::Measured`), as M-Bus reads its port.
-serial = { package = "xmip-core-transport-serial", git = "https://github.com/IlleNilsson/xmip-core-transport-serial", branch = "main", optional = true }
+serial = { workspace = true, optional = true }
 
 [features]
 # The code and its declaration: the transport guide's "The declaration",
@@ -43,7 +43,7 @@ declaration = []
 [dev-dependencies]
 # The loopback payloads the tests drive, from the capability's test
 # support and never a production build (ADR-0044).
-transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main", features = ["test-support"] }
+transport = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true
